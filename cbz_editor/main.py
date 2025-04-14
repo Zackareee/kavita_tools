@@ -10,7 +10,9 @@ import os
 import requests
 import sv_ttk
 import sys  # at top if not already
-
+import re
+import os
+from datetime import datetime
 
 class ComicMetadataEditor(tb.Window):
     base_font = ("Segoe UI", 12)
@@ -38,7 +40,14 @@ class ComicMetadataEditor(tb.Window):
         self.cover_name = None
         self.mangadex_id = None
 
-        self.paned = tb.PanedWindow(self, orient="horizontal")
+        self.tab_control = tb.Notebook(self)
+        self.tab_control.pack(fill="both", expand=True)
+
+        # Single Editor tab
+        self.single_tab = tb.Frame(self.tab_control)
+        self.tab_control.add(self.single_tab, text="Single Editor")
+
+        self.paned = tb.PanedWindow(self.single_tab, orient="horizontal")
         self.paned.pack(fill="both", expand=True)
 
         self.left_frame = tb.Frame(self.paned, padding=10)
@@ -50,6 +59,24 @@ class ComicMetadataEditor(tb.Window):
         self.setup_cover_ui()
         self.setup_toolbar()
         self.setup_cbz_file_list_ui()
+
+        # Bulk Editor tab
+        self.bulk_tab = tb.Frame(self.tab_control)
+        self.tab_control.add(self.bulk_tab, text="Bulk Editor")
+        self.setup_bulk_editor_ui()
+
+        # self.paned = tb.PanedWindow(self, orient="horizontal")
+        # self.paned.pack(fill="both", expand=True)
+        #
+        # self.left_frame = tb.Frame(self.paned, padding=10)
+        # self.paned.add(self.left_frame, weight=3)
+        # self.setup_metadata_ui()
+
+        # self.right_frame = tb.Frame(self.paned, padding=10)
+        # self.paned.add(self.right_frame, weight=2)
+        # self.setup_cover_ui()
+        # self.setup_toolbar()
+        # self.setup_cbz_file_list_ui()
 
         # Vertical separator
         # Clean UI styles for modern look
@@ -67,49 +94,311 @@ class ComicMetadataEditor(tb.Window):
                         borderwidth=2)
         style.configure("TLabelframe.Label", font=self.header_font, foreground="#222222", background="")  # use "" or omit
 
+    def get_current_metadata_dict(self):
+        return {f[0].get().strip(): f[1].get().strip() for f in self.fields if f is not None}
 
-        # Buttons: slightly rounded and consistent
-        # style.configure("TButton",
-        #                 font=("Segoe UI", 10),
-        #                 padding=6,
-        #                 borderwidth=1,
-        #                 relief="flat",
-        #                 bordercolor="#888",
-        #                 focusthickness=1,
-        #                 focuscolor="#ccc"
-        #                 )
-        # style.map("TButton",
-        #           relief=[("pressed", "flat"), ("!pressed", "flat")],
-        #           bordercolor=[("active", "#aaa")],
-        #           )
-        #
-        # # Entry: minimal, clean, rounded
-        # style.configure("TEntry",
-        #                 font=("Segoe UI", 10),
-        #                 padding=6,
-        #                 relief="flat",
-        #                 borderwidth=1,
-        #                 fieldbackground="#fff",
-        #                 bordercolor="#ccc"
-        #                 )
-        #
-        # # Labels: strong text contrast
-        # style.configure("TLabel",
-        #                 font=("Segoe UI", 10),
-        #                 foreground="#222"
-        #                 )
-        #
-        # # LabelFrame (like MangaDex Info): bold label, rounded border
-        # style.configure("TLabelframe",
-        #                 background="white",
-        #                 bordercolor="#666",
-        #                 relief="ridge",
-        #                 borderwidth=2
-        #                 )
-        # style.configure("TLabelframe.Label",
-        #                 font=("Segoe UI", 10, "bold"),
-        #                 foreground="#222"
-        #                 )
+    def resolve_template(self, template, metadata, filename, index=None):
+        result = template
+        # Replace filename placeholder
+        print(result)
+        if '{filename}' in result:
+            result = result.replace('{filename}', os.path.splitext(os.path.basename(filename))[0])
+
+        # Replace chapter number from filename
+        if '{chapter}' in result:
+            match = re.search(r'[Cc](?:h(?:apter)?)?[ ._]*([0-9]{1,4}(?:\.[0-9]+)?)', filename)
+            result = result.replace('{chapter}', match.group(1) if match else '')
+
+        # Replace volume number from filename
+        if '{volume}' in result:
+            match = re.search(r'[Vv]ol(?:ume)?[ ._]*([0-9]+)', filename)
+            result = result.replace('{volume}', match.group(1) if match else '')
+
+        # Replace index if provided
+        if '{index}' in result and index is not None:
+            result = result.replace('{index}', str(index))
+
+        # Replace date
+        if '{date}' in result:
+            result = result.replace('{date}', datetime.now().strftime('%Y-%m-%d'))
+
+        # Replace {value:FieldName}
+        matches = re.findall(r'\{value:([^}]+)\}', result)
+        for match in matches:
+            value = metadata.get(match, '')
+            result = result.replace(f'{{value:{match}}}', value)
+
+        return result
+
+    def setup_bulk_editor_ui(self):
+        # Split bulk editor tab horizontally
+        self.bulk_paned = tb.PanedWindow(self.bulk_tab, orient="horizontal")
+        self.bulk_paned.pack(fill="both", expand=True)
+
+        # Left side: Metadata fields (same layout as single editor)
+        self.bulk_left_frame = tb.Frame(self.bulk_paned, padding=10)
+        self.bulk_paned.add(self.bulk_left_frame, weight=3)
+
+        self.setup_bulk_metadata_fields_ui(self.bulk_left_frame)
+
+        # Right side: File selector + ComicInfo preview (you were missing this)
+        # Right side: File selector + ComicInfo preview
+        self.bulk_right_frame = tb.Frame(self.bulk_paned, padding=10)
+        self.bulk_paned.add(self.bulk_right_frame, weight=2)
+        # Apply button
+        apply_btn = tb.Button(
+            self.bulk_right_frame,
+            text="Apply to All",
+            bootstyle="success",
+            command=self.apply_bulk_metadata
+        )
+        apply_btn.pack(pady=10)
+
+        # 🔹 Add Load Button at the top
+        load_btn = tb.Button(self.bulk_right_frame, text="Load CBZ Files", bootstyle="primary",
+                             command=self.load_bulk_cbz_files)
+        load_btn.pack(pady=(0, 10))
+
+        # Split right vertically into file list and preview
+        rhs_pane = tb.PanedWindow(self.bulk_right_frame, orient="vertical")
+        rhs_pane.pack(fill="both", expand=True)
+
+        # Top: file list
+        file_list_frame = tb.LabelFrame(rhs_pane, text="Selected CBZ Files", padding=10)
+        rhs_pane.add(file_list_frame, weight=1)
+
+        self.bulk_cbz_listbox = tk.Listbox(file_list_frame, height=10, font=self.base_font)
+        self.bulk_cbz_listbox.pack(fill="both", expand=True)
+        self.bulk_cbz_listbox.bind("<<ListboxSelect>>", self.preview_bulk_comicinfo)
+
+        # Bottom: ComicInfo preview
+        preview_frame = tb.LabelFrame(rhs_pane, text="ComicInfo Preview", padding=10)
+        rhs_pane.add(preview_frame, weight=2)
+
+        self.bulk_preview_text = tk.Text(preview_frame, wrap="word", state="disabled", font=self.base_font)
+        self.bulk_preview_text.pack(fill="both", expand=True)
+
+    def setup_bulk_metadata_fields_ui(self, parent):
+        metadata_frame = tb.LabelFrame(parent, text="Metadata Fields (Bulk)", bootstyle="secondary", padding=10)
+        metadata_frame.pack(fill="both", expand=True)
+
+        self.bulk_canvas = tk.Canvas(metadata_frame, highlightthickness=0)
+        scrollbar = tb.Scrollbar(metadata_frame, orient="vertical", command=self.bulk_canvas.yview)
+        self.bulk_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.bulk_canvas.pack(side="left", fill="both", expand=True)
+
+        self.bulk_form_frame = tb.Frame(self.bulk_canvas)
+        self.bulk_form_window = self.bulk_canvas.create_window((0, 0), window=self.bulk_form_frame, anchor="nw")
+
+        self.bulk_form_frame.bind("<Configure>",
+                                  lambda e: self.bulk_canvas.configure(scrollregion=self.bulk_canvas.bbox("all")))
+        self.bulk_canvas.bind("<Configure>",
+                              lambda e: self.bulk_canvas.itemconfig(self.bulk_form_window, width=e.width))
+
+        # Example: just add a dummy field initially
+        self.bulk_fields = []
+        self.add_bulk_field()
+
+        # Add field button
+        self.bulk_add_field_btn = tb.Button(
+            metadata_frame, text="+ Add Field", bootstyle="primary-outline",
+            command=self.add_bulk_field
+        )
+        self.bulk_add_field_btn.pack(pady=5)
+
+    def preview_bulk_comicinfo(self, event):
+        selection = self.bulk_cbz_listbox.curselection()
+        if not selection:
+            return
+
+        idx = selection[0]
+        path = self.bulk_cbz_paths[idx]
+
+        try:
+            with open(path, 'rb') as f:
+                cbz_bytes = f.read()
+            with ZipFile(io.BytesIO(cbz_bytes), 'r') as zipf:
+                if 'ComicInfo.xml' in zipf.namelist():
+                    xml_data = zipf.read('ComicInfo.xml').decode(errors="replace")
+                else:
+                    xml_data = "[No ComicInfo.xml found]"
+
+            self.bulk_preview_text.config(state="normal")
+            self.bulk_preview_text.delete("1.0", "end")
+            self.bulk_preview_text.insert("1.0", xml_data)
+            self.bulk_preview_text.config(state="disabled")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read CBZ:\n{e}")
+
+    def load_bulk_cbz_files(self):
+        paths = filedialog.askopenfilenames(filetypes=[("Comic Book Zip", "*.cbz")])
+        if not paths:
+            return
+
+        self.bulk_cbz_paths = list(paths)
+        self.bulk_cbz_listbox.delete(0, "end")
+
+        for path in self.bulk_cbz_paths:
+            filename = os.path.basename(path)
+            self.bulk_cbz_listbox.insert("end", filename)
+
+    def add_bulk_field(self, key="", value=""):
+        row = len(self.bulk_fields)
+        key_var = tk.StringVar(value=key)
+        val_var = tk.StringVar(value=value)
+
+        key_entry = tb.Entry(self.bulk_form_frame, textvariable=key_var, font=self.base_font)
+        val_entry = tb.Entry(self.bulk_form_frame, textvariable=val_var, font=self.base_font)
+        delete_button = tb.Button(self.bulk_form_frame, text="❌", width=3, command=lambda: self.remove_bulk_field(row))
+
+        key_entry.grid(row=row, column=0, padx=4, pady=3, sticky="ew")
+        val_entry.grid(row=row, column=1, padx=4, pady=3, sticky="ew")
+        delete_button.grid(row=row, column=2, padx=4, pady=3, sticky="e")
+
+        self.bulk_form_frame.grid_columnconfigure(0, weight=1)
+        self.bulk_form_frame.grid_columnconfigure(1, weight=2)
+        self.bulk_form_frame.grid_columnconfigure(2, weight=0)
+
+        self.bulk_fields.append((key_var, val_var, key_entry, val_entry, delete_button))
+
+    def remove_bulk_field(self, index):
+        if self.bulk_fields[index] is None:
+            return
+        _, _, key_widget, val_widget, del_button = self.bulk_fields[index]
+        key_widget.destroy()
+        val_widget.destroy()
+        del_button.destroy()
+        self.bulk_fields[index] = None
+
+    def apply_bulk_metadata(self):
+        if not self.bulk_fields or all(f is None for f in self.bulk_fields):
+            messagebox.showwarning("No Fields", "No metadata fields to apply.")
+            return
+
+        files = self.bulk_file_listbox.get(0, "end")
+        if not files:
+            messagebox.showwarning("No Files", "No CBZ files selected.")
+            return
+
+        fields_to_apply = []
+        for f in self.bulk_fields:
+            if f is None:
+                continue
+            key = f[0].get().strip()
+            val = str(f[1].get()).strip()
+            if key:
+                fields_to_apply.append((key, val))
+
+        if not fields_to_apply:
+            messagebox.showwarning("Empty Fields", "All fields are blank.")
+            return
+
+        failed = []
+
+        for index, path in enumerate(self.bulk_cbz_paths):
+            with open(path, "rb") as f:
+                cbz_bytes = f.read()
+
+            try:
+                with ZipFile(io.BytesIO(cbz_bytes), 'r') as zipf:
+                    if 'ComicInfo.xml' in zipf.namelist():
+                        xml_data = zipf.read('ComicInfo.xml')
+                        root = etree.fromstring(xml_data)
+                    else:
+                        root = etree.Element("ComicInfo")
+
+                    # Convert existing to dict
+                    current_data = {child.tag: child.text or "" for child in root}
+
+                    # Apply each field
+                    for key_var, val_var, *_ in self.bulk_fields:
+                        key = key_var.get().strip()
+                        raw_val = str(val_var.get().strip())
+                        if key:
+                            resolved = self.resolve_template(raw_val, current_data, path, index=index)
+                            existing = root.find(key)
+                            if existing is not None:
+                                existing.text = resolved
+                            else:
+                                etree.SubElement(root, key).text = resolved
+
+                # Save new CBZ
+                temp_cbz = path + ".tmp"
+                with ZipFile(io.BytesIO(cbz_bytes), 'r') as zin, ZipFile(temp_cbz, 'w') as zout:
+                    for item in zin.infolist():
+                        if item.filename != 'ComicInfo.xml':
+                            zout.writestr(item, zin.read(item))
+                    zout.writestr("ComicInfo.xml",
+                                  etree.tostring(root, pretty_print=True, encoding="utf-8", xml_declaration=True))
+                os.replace(temp_cbz, path)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to update {os.path.basename(path)}:\n{e}")
+
+        if failed:
+            messagebox.showerror("Some Files Failed",
+                                 f"{len(failed)} files failed:\n\n" + "\n".join(f[0] for f in failed))
+        else:
+            messagebox.showinfo("Done", "Metadata applied to all selected CBZ files.")
+
+    def remove_bulk_field(self, index):
+        if self.bulk_fields[index] is None:
+            return
+        _, _, key_entry, val_entry, del_btn = self.bulk_fields[index]
+        key_entry.destroy()
+        val_entry.destroy()
+        del_btn.destroy()
+        self.bulk_fields[index] = None
+        self.repack_bulk_fields()
+
+    def repack_bulk_fields(self):
+        new_fields = [f for f in self.bulk_fields if f is not None]
+        self.bulk_fields = []
+        for widget in self.bulk_form_frame.winfo_children():
+            widget.destroy()
+        for key_var, val_var, *_ in new_fields:
+            self.add_bulk_field(key_var.get(), val_var.get())
+
+    def bulk_apply_tag(self):
+        key = self.bulk_key_var.get().strip()
+        val = self.bulk_val_var.get().strip()
+        if not key:
+            messagebox.showwarning("Missing Field", "Metadata key is required.")
+            return
+
+        updated = 0
+        for path in getattr(self, "bulk_cbz_paths", []):
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+
+                with ZipFile(io.BytesIO(data), 'r') as zin:
+                    namelist = zin.namelist()
+                    xml_data = zin.read("ComicInfo.xml") if "ComicInfo.xml" in namelist else b"<ComicInfo/>"
+                    root = etree.fromstring(xml_data)
+                    found = False
+                    for el in root:
+                        if el.tag.lower() == key.lower():
+                            el.text = val
+                            found = True
+                            break
+                    if not found:
+                        etree.SubElement(root, key).text = val
+                    new_xml = etree.tostring(root, pretty_print=True, encoding="utf-8", xml_declaration=True)
+
+                temp_path = path + ".tmp"
+                with ZipFile(io.BytesIO(data), 'r') as zin, ZipFile(temp_path, 'w') as zout:
+                    for item in zin.infolist():
+                        if item.filename != "ComicInfo.xml":
+                            zout.writestr(item, zin.read(item))
+                    zout.writestr("ComicInfo.xml", new_xml)
+
+                os.replace(temp_path, path)
+                updated += 1
+            except Exception as e:
+                print(f"Failed to update {path}: {e}")
+
+        messagebox.showinfo("Done", f"Updated {updated} CBZ files.")
 
     def clear_cbz_context(self):
         self.cbz_path = None
@@ -121,9 +410,12 @@ class ComicMetadataEditor(tb.Window):
 
         self.clear_all_fields()
         self.cbz_file_listbox.delete(0, "end")
-        self.cbz_file_preview.config(state="normal")
-        self.cbz_file_preview.delete("1.0", "end")
-        self.cbz_file_preview.config(state="disabled")
+        self.cbz_file_preview_canvas.delete("all")
+        self.cbz_file_preview_text.config(state="normal")
+        self.cbz_file_preview_text.delete("1.0", "end")
+        self.cbz_file_preview_text.config(state="disabled")
+        self.cbz_file_preview_text.place_forget()
+
         self.cover_canvas.delete("all")
         self.cover_canvas.create_rectangle(10, 10, 270, 370, fill='lightgray')
         self.cover_canvas.create_text(140, 190, text="No Cover", font=("Arial", 16))
@@ -804,9 +1096,10 @@ class ComicMetadataEditor(tb.Window):
             if f is None:
                 continue
             key = f[0].get().strip()
-            val = f[1].get().strip()
+            val = str(f[1].get().strip())
             if key:
-                etree.SubElement(root, key).text = val
+                resolved = self.resolve_template(val, self.get_current_metadata_dict(), self.cbz_path)
+                etree.SubElement(root, key).text = resolved
 
         xml_data = etree.tostring(root, pretty_print=True, encoding="utf-8", xml_declaration=True)
         temp_cbz = self.cbz_path + ".tmp"
