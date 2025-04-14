@@ -59,11 +59,13 @@ def get_volume_from_file(filename: str) -> str:
     volume = cbz.get_tag("Volume")
     return volume
 
-def add_cover_to_cbz(cover: Image, filepath:str) -> None:
+def add_cover_to_cbz(cover: Image, filepath:str, locale:str) -> None:
     cbz = CBZ(filepath)
     cbz.load()
     cbz.replace_file("folder.jpg", cover)
     cbz.set_tag("coverImage", "True")
+    cbz.set_tag("Locale", "True")
+
     cbz.save(filepath)
 
 def get_image_with_url(manga_id, filepath) -> str:
