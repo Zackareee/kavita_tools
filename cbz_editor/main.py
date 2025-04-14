@@ -65,19 +65,6 @@ class ComicMetadataEditor(tb.Window):
         self.tab_control.add(self.bulk_tab, text="Bulk Editor")
         self.setup_bulk_editor_ui()
 
-        # self.paned = tb.PanedWindow(self, orient="horizontal")
-        # self.paned.pack(fill="both", expand=True)
-        #
-        # self.left_frame = tb.Frame(self.paned, padding=10)
-        # self.paned.add(self.left_frame, weight=3)
-        # self.setup_metadata_ui()
-
-        # self.right_frame = tb.Frame(self.paned, padding=10)
-        # self.paned.add(self.right_frame, weight=2)
-        # self.setup_cover_ui()
-        # self.setup_toolbar()
-        # self.setup_cbz_file_list_ui()
-
         # Vertical separator
         # Clean UI styles for modern look
         style = self.style
